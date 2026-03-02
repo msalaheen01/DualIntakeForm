@@ -47,6 +47,12 @@ export const LABELS: Record<
     viewDashboard: string;
     trends: string;
     caseId: string;
+    assignedTo: string;
+    lastUpdated: string;
+    dateResolved: string;
+    exportCsv: string;
+    caseDetails: string;
+    close: string;
   }
 > = {
   en: {
@@ -94,6 +100,12 @@ export const LABELS: Record<
     viewDashboard: "View Dashboard",
     trends: "Trends by Category",
     caseId: "Case ID",
+    assignedTo: "Assigned To",
+    lastUpdated: "Last Updated",
+    dateResolved: "Date Resolved",
+    exportCsv: "Export Filtered Cases (CSV)",
+    caseDetails: "Case Details",
+    close: "Close",
   },
   bn: {
     appTitle: "জেলা অফিস – অভিযোগ দাখিল ও মামলা তদারকি",
@@ -141,6 +153,12 @@ export const LABELS: Record<
     viewDashboard: "ড্যাশবোর্ড দেখুন",
     trends: "ধরণ অনুযায়ী প্রবণতা",
     caseId: "মামলা নম্বর",
+    assignedTo: "দায়িত্বপ্রাপ্ত",
+    lastUpdated: "সর্বশেষ হালনাগাদ",
+    dateResolved: "নিষ্পত্তির তারিখ",
+    exportCsv: "ফিল্টারকৃত মামলা সিএসভি রপ্তানি",
+    caseDetails: "মামলার বিবরণ",
+    close: "বন্ধ",
   },
 };
 

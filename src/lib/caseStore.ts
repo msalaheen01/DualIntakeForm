@@ -8,7 +8,13 @@ export function loadCases(): CaseRecord[] {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
-    return Array.isArray(parsed) ? parsed : [];
+    const arr = Array.isArray(parsed) ? parsed : [];
+    return arr.map((c: Record<string, unknown>) => ({
+      ...c,
+      assignedTo: (c.assignedTo as string) ?? "",
+      lastUpdated: (c.lastUpdated as string) ?? (c.dateSubmitted as string) ?? new Date().toISOString(),
+      dateResolved: c.dateResolved as string | undefined,
+    })) as CaseRecord[];
   } catch {
     return [];
   }

@@ -19,11 +19,18 @@ const ISSUE_CATEGORIES: IssueCategory[] = [
   "Other",
 ];
 
-function daysSince(dateIso: string): number {
-  const d = new Date(dateIso);
-  const now = new Date();
-  const diff = now.getTime() - d.getTime();
-  return Math.floor(diff / (24 * 60 * 60 * 1000));
+/** Days open: if resolved, use dateResolved - dateSubmitted; else today - dateSubmitted */
+function daysOpen(rec: CaseRecord): number {
+  const submitted = new Date(rec.dateSubmitted).getTime();
+  const end = rec.dateResolved
+    ? new Date(rec.dateResolved).getTime()
+    : Date.now();
+  return Math.floor((end - submitted) / (24 * 60 * 60 * 1000));
+}
+
+function escapeCsvCell(s: string): string {
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
 }
 
 export default function DashboardPage() {
@@ -36,6 +43,7 @@ export default function DashboardPage() {
   const [filterStatus, setFilterStatus] = useState<CaseStatus | "All">("All");
   const [filterCategory, setFilterCategory] = useState<IssueCategory | "All">("All");
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({});
+  const [detailCase, setDetailCase] = useState<CaseRecord | null>(null);
 
   useEffect(() => {
     setCases(loadCases());
@@ -48,7 +56,7 @@ export default function DashboardPage() {
   });
 
   const pendingCount = cases.filter((c) => c.status === "Pending").length;
-  const totalDays = cases.reduce((sum, c) => sum + daysSince(c.dateSubmitted), 0);
+  const totalDays = cases.reduce((sum, c) => sum + daysOpen(c), 0);
   const avgDaysOpen = cases.length ? Math.round(totalDays / cases.length) : 0;
 
   const categoryCounts: Record<IssueCategory, number> = {
@@ -70,16 +78,42 @@ export default function DashboardPage() {
       ? catLabels[sortedCategories[0][0]]
       : "—";
 
+  const nowIso = () => new Date().toISOString();
+
+  function refreshCasesAndDetail(caseId: string) {
+    const next = loadCases();
+    setCases(next);
+    if (detailCase?.caseId === caseId) {
+      setDetailCase(next.find((c) => c.caseId === caseId) ?? null);
+    }
+  }
+
   function handleStatusChange(record: CaseRecord, newStatus: CaseStatus) {
-    const updated = { ...record, status: newStatus };
+    const updated: CaseRecord = {
+      ...record,
+      status: newStatus,
+      lastUpdated: nowIso(),
+      dateResolved:
+        newStatus === "Resolved"
+          ? nowIso()
+          : record.status === "Resolved"
+            ? undefined
+            : record.dateResolved,
+    };
     upsertCase(updated);
-    setCases(loadCases());
+    refreshCasesAndDetail(record.caseId);
   }
 
   function handleAgencyChange(record: CaseRecord, agency: string) {
-    const updated = { ...record, agency };
+    const updated = { ...record, agency, lastUpdated: nowIso() };
     upsertCase(updated);
-    setCases(loadCases());
+    refreshCasesAndDetail(record.caseId);
+  }
+
+  function handleAssignedToChange(record: CaseRecord, assignedTo: string) {
+    const updated = { ...record, assignedTo, lastUpdated: nowIso() };
+    upsertCase(updated);
+    refreshCasesAndDetail(record.caseId);
   }
 
   function handleAddNote(record: CaseRecord) {
@@ -89,16 +123,73 @@ export default function DashboardPage() {
       ...record,
       followUpNotes: [
         ...record.followUpNotes,
-        { date: new Date().toISOString(), note },
+        { date: nowIso(), note },
       ],
+      lastUpdated: nowIso(),
     };
     upsertCase(updated);
     setNoteInputs((prev) => ({ ...prev, [record.caseId]: "" }));
-    setCases(loadCases());
+    refreshCasesAndDetail(record.caseId);
+  }
+
+  function handleRowClick(rec: CaseRecord, e: React.MouseEvent<HTMLTableRowElement>) {
+    if ((e.target as HTMLElement).closest("select, input, button")) return;
+    setDetailCase(rec);
+  }
+
+  function exportCsv() {
+    const headers = [
+      "Case ID",
+      "Full Name",
+      "Phone",
+      "Email",
+      "Preferred Language",
+      "Address",
+      "Issue Category",
+      "Description",
+      "Urgency",
+      "Status",
+      "Assigned To",
+      "Agency",
+      "Date Submitted",
+      "Date Resolved",
+      "Days Open",
+      "Last Updated",
+    ];
+    const rows = filtered.map((rec) => [
+      rec.caseId,
+      rec.fullName,
+      rec.phone,
+      rec.email,
+      rec.preferredLanguage,
+      rec.address,
+      rec.issueCategory,
+      rec.description,
+      rec.urgency,
+      rec.status,
+      rec.assignedTo ?? "",
+      rec.agency,
+      rec.dateSubmitted,
+      rec.dateResolved ?? "",
+      String(daysOpen(rec)),
+      rec.lastUpdated ?? "",
+    ]);
+    const csvContent = [
+      headers.join(","),
+      ...rows.map((row) => row.map(escapeCsvCell).join(",")),
+    ].join("\r\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const yyyymmdd = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    a.download = `district_cases_${yyyymmdd}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
-    <div style={{ padding: "2rem", maxWidth: 1200, margin: "0 auto" }}>
+    <div style={{ padding: "2rem", maxWidth: 1200, margin: "0 auto", position: "relative" }}>
       <div style={{ marginBottom: "1rem", display: "flex", alignItems: "center", gap: 8 }}>
         <span>{t.languageToggle}:</span>
         <button
@@ -118,6 +209,23 @@ export default function DashboardPage() {
       </div>
 
       <h1 style={{ fontSize: "1.5rem", marginBottom: "1rem" }}>{t.dashboardTitle}</h1>
+
+      <div style={{ marginBottom: "1rem" }}>
+        <button
+          type="button"
+          onClick={exportCsv}
+          style={{
+            padding: "0.5rem 1rem",
+            background: "#2d3748",
+            color: "#fff",
+            border: "none",
+            borderRadius: 4,
+            cursor: "pointer",
+          }}
+        >
+          {t.exportCsv}
+        </button>
+      </div>
 
       <div
         style={{
@@ -204,6 +312,7 @@ export default function DashboardPage() {
               <th style={thStyle}>{t.fullName}</th>
               <th style={thStyle}>{t.filterCategory}</th>
               <th style={thStyle}>{t.status}</th>
+              <th style={thStyle}>{t.assignedTo}</th>
               <th style={thStyle}>{t.daysSince}</th>
               <th style={thStyle}>{t.urgencyShort}</th>
               <th style={thStyle}>{t.dateSubmitted}</th>
@@ -213,7 +322,11 @@ export default function DashboardPage() {
           </thead>
           <tbody>
             {filtered.map((rec) => (
-              <tr key={rec.caseId} style={{ borderBottom: "1px solid #e2e8f0" }}>
+              <tr
+                key={rec.caseId}
+                style={{ borderBottom: "1px solid #e2e8f0", cursor: "pointer" }}
+                onClick={(e) => handleRowClick(rec, e)}
+              >
                 <td style={tdStyle}>{rec.caseId}</td>
                 <td style={tdStyle}>{rec.fullName}</td>
                 <td style={tdStyle}>{catLabels[rec.issueCategory]}</td>
@@ -230,7 +343,16 @@ export default function DashboardPage() {
                     ))}
                   </select>
                 </td>
-                <td style={tdStyle}>{daysSince(rec.dateSubmitted)}</td>
+                <td style={tdStyle}>
+                  <input
+                    type="text"
+                    value={rec.assignedTo ?? ""}
+                    onChange={(e) => handleAssignedToChange(rec, e.target.value)}
+                    placeholder="—"
+                    style={{ width: "100%", minWidth: 80, padding: "2px 6px" }}
+                  />
+                </td>
+                <td style={tdStyle}>{daysOpen(rec)}</td>
                 <td style={tdStyle}>{urgencyLabels[rec.urgency]}</td>
                 <td style={tdStyle}>
                   {new Date(rec.dateSubmitted).toLocaleDateString()}
@@ -281,6 +403,56 @@ export default function DashboardPage() {
         <p style={{ color: "#718096", marginTop: "1rem" }}>
           {cases.length === 0 ? "No cases yet." : "No cases match the current filters."}
         </p>
+      )}
+
+      {detailCase && (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            right: 0,
+            width: 360,
+            maxWidth: "100%",
+            height: "100%",
+            background: "#fff",
+            boxShadow: "-2px 0 8px rgba(0,0,0,0.15)",
+            zIndex: 1000,
+            overflow: "auto",
+            padding: "1.5rem",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+            <h2 style={{ fontSize: "1.1rem", margin: 0 }}>{t.caseDetails}: {detailCase.caseId}</h2>
+            <button
+              type="button"
+              onClick={() => setDetailCase(null)}
+              style={{ padding: "4px 12px", cursor: "pointer" }}
+            >
+              {t.close}
+            </button>
+          </div>
+          <div style={{ fontSize: "0.875rem" }}>
+            <p><strong>{t.description}</strong></p>
+            <p style={{ whiteSpace: "pre-wrap", marginTop: 4 }}>{detailCase.description}</p>
+            <p style={{ marginTop: "1rem" }}><strong>{t.notes}</strong></p>
+            <ul style={{ paddingLeft: "1.25rem", marginTop: 4 }}>
+              {[...detailCase.followUpNotes].reverse().map((n, i) => (
+                <li key={i} style={{ marginBottom: 4 }}>
+                  {new Date(n.date).toLocaleString()}: {n.note}
+                </li>
+              ))}
+              {detailCase.followUpNotes.length === 0 && <li>—</li>}
+            </ul>
+            <p style={{ marginTop: "1rem" }}><strong>{t.assignedTo}</strong> {detailCase.assignedTo || "—"}</p>
+            <p><strong>{t.agency}</strong> {detailCase.agency || "—"}</p>
+            <p><strong>{t.status}</strong> {detailCase.status === "Pending" ? t.pending : detailCase.status === "Escalated" ? t.escalated : t.resolved}</p>
+            <p><strong>{t.dateSubmitted}</strong> {new Date(detailCase.dateSubmitted).toLocaleString()}</p>
+            {detailCase.dateResolved && (
+              <p><strong>{t.dateResolved}</strong> {new Date(detailCase.dateResolved).toLocaleString()}</p>
+            )}
+            <p><strong>{t.lastUpdated}</strong> {new Date(detailCase.lastUpdated).toLocaleString()}</p>
+          </div>
+        </div>
       )}
 
       <p style={{ marginTop: "1.5rem" }}>

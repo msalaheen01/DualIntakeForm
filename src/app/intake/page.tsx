@@ -53,6 +53,7 @@ export default function IntakePage() {
     }
     const cases = loadCases();
     const caseId = createCaseId(cases);
+    const dateSubmitted = new Date().toISOString();
     const record: CaseRecord = {
       caseId,
       fullName: fullName.trim(),
@@ -64,9 +65,12 @@ export default function IntakePage() {
       description: description.trim(),
       urgency,
       status: "Pending",
-      dateSubmitted: new Date().toISOString(),
+      dateSubmitted,
       agency: "",
       followUpNotes: [],
+      assignedTo: "",
+      lastUpdated: dateSubmitted,
+      dateResolved: undefined,
     };
     upsertCase(record);
     setCreatedId(caseId);

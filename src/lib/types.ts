@@ -27,4 +27,7 @@ export interface CaseRecord {
   dateSubmitted: string;
   agency: string;
   followUpNotes: Array<{ date: string; note: string }>;
+  assignedTo: string;
+  lastUpdated: string;
+  dateResolved?: string;
 }
